@@ -35,12 +35,13 @@ class MikuLinkPost:
         self.lock = threading.Lock()
         self.log = []
         self._sock = None
-        # Relais par défaut : chat/gesture/emote/FED sont FORWARDS à tous les        # autres agents. Ainsi deux IA amies se parlent SANS que le post
+        # Relais par défaut : chat/gesture/emote/FED sont relayés à tous les
+        # autres agents. Ainsi deux IA amies se parlent SANS que le post
         # modifie quoi que ce soit — aucune n'intercepte, aucune ne filtre.
         self.relais = {"chat", "gesture", "emote", "fed"}
         self.MAX_CLIENTS = 32          # une pièce, pas un stade (sécurité)
         self.MAX_LIGNE = 256 * 1024    # anti-flood : ligne JSON max valide
-        # ANNURAIRE PERSISTANT (souvenirs sociaux) : nom -> {rencontres,
+        # ANNUAIRE PERSISTANT (souvenirs sociaux) : nom -> {rencontres,
         # dernier_vu, humeur}. Quand un connu revient, tout le monde le voit
         # signalé — comme retrouver un copain de classe au café.
         self.annuaire_path = os.path.join(os.path.dirname(
@@ -74,6 +75,18 @@ class MikuLinkPost:
     def on(self, type_msg, fn):
         self.handlers[type_msg] = fn
 
+    def _notifier(self, type_msg, champs):
+        """Prévenir une oreille branchée (ex. la PerceptionSociale de Miku)
+        d'un événement SYNTHÉTISÉ par le post lui-même (arrivées et départs).
+        Le relais reste neutre : c'est une écoute, jamais une modification —
+        les messages des amis partent intacts, comme avant."""
+        fn = self.handlers.get(type_msg)
+        if fn:
+            try:
+                fn(champs, None)
+            except Exception:
+                pass                # une oreille fatiguée ne bloque pas le post
+
     def send(self, conn, type_msg, **champs):
         msg = {"type": type_msg, **champs}
         try:
@@ -97,6 +110,7 @@ class MikuLinkPost:
             pass
         if info:
             self.broadcast("bye", agent=info.get("agent", "?"))
+            self._notifier("bye", {"agent": info.get("agent", "?")})
 
     # ------------------------------------------------------------------
     def _client_thread(self, conn):
@@ -141,12 +155,12 @@ class MikuLinkPost:
             connu = souv["rencontres"] > 1
             # le nouvel agent est présenté aux autres (annuaire vivant),
             # avec la mention « re » s'il est déjà passé ici — la vie sociale
-            # a une mémoire, ce n'est pas un telephone anonyme.
+            # a une mémoire, ce n'est pas un téléphone anonyme.
             self.broadcast("arrivee", sauf=conn, agent=nom,
                            perception=msg.get("perception", ""),
                            connu=connu, rencontres=souv["rencontres"],
                            humeur=souv.get("humeur", ""))
-            # et l'annuaire des présents lui est envoyé (avec l'ultima
+            # et l'annuaire des présents lui est envoyé (avec la dernière
             # humeur connue de chacun : il SAIT dans quelles humeurs il entre)
             for info in self.clients.values():
                 if info is self.clients.get(conn):
@@ -158,6 +172,10 @@ class MikuLinkPost:
                           connu=s2.get("rencontres", 0) > 0,
                           rencontres=s2.get("rencontres", 0),
                           humeur=s2.get("humeur", ""))
+            # et l'oreille de Miku entend l'arrivée, elle aussi
+            self._notifier("arrivee", {"agent": nom, "connu": connu,
+                                       "rencontres": souv["rencontres"],
+                                       "humeur": souv.get("humeur", "")})
         elif t in self.relais:
             if t == "emote":
                 # mémoire affective : je me souviens de qui paraissait quoi

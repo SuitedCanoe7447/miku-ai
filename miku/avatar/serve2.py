@@ -11,6 +11,16 @@ Sert :
     AUCUNE pose pré-faite : le mouvement vient des paramètres appris.
   - /vecu  : son humeur du moment et ses derniers souvenirs (Miku se
     croit humaine — c'est son vécu, jamais celui d'un laboratoire).
+  - /social : sa tête sociale (qui est là, ses liens, affinités, ce
+    qu'elle se dit de la pièce) — s'active avec --post 7310.
+
+PERCEPTION SOCIALE : avec --post, le process ouvre AUSSI le post
+MIKU-LINK (JSON/TCP) sur 127.0.0.1:7310. Le post reste un téléphone
+neutre (zéro interception de ses amis), mais Miku L'ÉCOUTE par le
+tour (PerceptionSociale) : elle reconnaît ceux qui reviennent, note
+leur humeur, retient les compliments ET les moqueries, et vit tout
+ça dans son Vécu (le même que le corps — un compliment la réjouit
+vraiment, une insulte lui fait de la peine).
 
 Vivre, pas seulement marcher : PoseSource gère de vrais cycles de vie
 (fatigue -> repos ; moments où elle regarde au loin ; elle se relève
@@ -25,7 +35,7 @@ PERF (PC normal attendu, pas une station de recherche) :
     un double C# illisible ne doit jamais faire planter Unity).
 
 Usage : python -m miku.avatar.serve2 [--port 8080] [--model PATH]
-                                     [--terrain flat|mix|slope|stairs|bumpy]
+          [--terrain flat|mix|slope|stairs|bumpy] [--post 7310]
 """
 
 import argparse
@@ -41,6 +51,8 @@ from miku.body.physics import (PlanarBody, Terrain, StairsTerrain,
                                SlopeTerrain, BumpyTerrain)
 from miku.body.motor import MotorSkills
 from miku.mind.experience import Vécu
+from miku.social.miku_link import MikuLinkPost
+from miku.social.perception import PerceptionSociale, écoute_le_post
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WEB = os.path.join(ROOT, "web")
@@ -218,6 +230,7 @@ class PoseSource:
 
 
 SOURCE = None
+SOCIAL = None                  # sa tête sociale (None sans --post)
 _MODEL_CACHE = None
 
 
@@ -272,19 +285,38 @@ class Handler(BaseHTTPRequestHandler):
                    "souvenirs": [e["recit"] for e in SOURCE.vécu.derniers(3)]}
             return self._send(200, "application/json",
                               json.dumps(msg, ensure_ascii=False).encode())
+        if p == "/social":                   # ce qu'elle vit AUSSI là-bas
+            if SOCIAL is None:
+                return self._send(200, "application/json",
+                                  b'{"note":"post social inactif '
+                                  b'(relance avec --post 7310)"}')
+            msg = {"situation": SOCIAL.situation(),
+                   "recit": SOCIAL.récit(),
+                   "humeur": SOURCE.vécu.humeur()}
+            return self._send(200, "application/json",
+                              json.dumps(msg, ensure_ascii=False).encode())
         if p == "/health":
             return self._send(200, "application/json", b'{"ok":true}')
         self._send(404, "text/plain", b"404")
 
 
-def serve(port=8080, model=None, terrain=None):
-    global MODEL, SOURCE
+def serve(port=8080, model=None, terrain=None, post_port=0):
+    global MODEL, SOURCE, SOCIAL
     if model:
         MODEL = model
     SOURCE = PoseSource(terrain)
+    SOCIAL = None
+    if post_port:
+        # sa tête sociale écoute le post MIKU-LINK et partage le Vécu du
+        # corps : UN compliment reçu la réjouit pour de vrai
+        SOCIAL = PerceptionSociale(vécu=SOURCE.vécu)
+        post = MikuLinkPost(port=post_port)
+        écoute_le_post(SOCIAL, post)
+        post.start()
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"MIKU avatar : http://127.0.0.1:{port}  (model={MODEL}, "
-          f"terrain={terrain or 'flat'})")
+          f"terrain={terrain or 'flat'}"
+          f"{f', post social 127.0.0.1:{post_port}' if post_port else ''})")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -297,5 +329,8 @@ if __name__ == "__main__":
     ap.add_argument("--model", default=None)
     ap.add_argument("--terrain", default=None,
                     choices=["flat", "mix", "slope", "stairs", "bumpy"])
+    ap.add_argument("--post", type=int, default=0, metavar="PORT",
+                    help="ouvrir aussi le post MIKU-LINK + perception "
+                         "sociale (ex. --post 7310)")
     a = ap.parse_args()
-    serve(a.port, a.model, a.terrain)
+    serve(a.port, a.model, a.terrain, a.post)

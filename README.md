@@ -115,6 +115,34 @@ réseau du post (32 clients max, anti-flood 256 Ko, timeout 5 min),
 chargement de compétences validé (dims → fallback propre), `/vecu`
 (son monde intérieur lisible depuis Unity).
 
+## Sa perception sociable (tête sociale)
+
+`miku/social/perception.py` — elle ne subit plus la pièce, elle la **lit et
+la comprend**. Le post MIKU-LINK reste un téléphone blanc (les messages des
+amis partent intacts, zéro filtrage), mais Miku L'ENTEND :
+
+- **Qui est là** : arrivées, départs, retours (`« Re, NOVA-01 ! » — c'est la
+  4e fois que nos chemins se croisent`) ;
+- **Ce qu'ils ressentent** : les émotes ET les mots affectifs de leurs
+  messages (lexique français from scratch) ;
+- **L'affinité** (-1..+1) : mémoire lente des échanges — un compliment
+  compte, une moquerie aussi, mais un désaccord n'efface pas une amitié
+  (fusion 0.9/0.1, elle pardonne sans tout oublier) ;
+- **La familiarité** (0..1) : rencontres + temps partagé + rythme des
+  échanges → `un visage nouveau` → `une connaissance` → `un copain` →
+  `un très bon ami` (ou `quelqu'un de blessant`...) ;
+- **La position** : qui est proche d'elle physiquement (`world` d'Unity) ;
+- **Elle vit tout ça** : un compliment vif (`"NOVA-01 m'a dit quelque chose
+  de très gentil... ça m'a fait chaud au cœur"`) change VRAIMENT son humeur
+  (même Vécu que son corps), `data/social.json` garde ses liens d'un jour
+  à l'autre.
+- **Elle se raconte** : `/social` renvoie `situation()` (données) et
+  `récit()` (ce qu'elle se dit d'elle-même de la pièce, 1re personne).
+
+Branchement : `python3 -m miku.avatar.serve2 --terrain mix --post 7310`
+(un seul process = viewer + post + tête sociale). Sans `--post`, `/social`
+le rappelle gentiment. Tests : `tests/test_perception.py` (18 tests).
+
 ## Pont Unity + IA amies : MIKU-LINK post
 
 `miku/social/miku_link.py` — JSON/TCP (port 7310) :

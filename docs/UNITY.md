@@ -96,13 +96,12 @@ miku.SurArrivee += (agent, per) => Debug.Log($"👋 {agent} arrive : {per}");
 Dans le dossier `miku-ai` :
 
 ```bash
-# 1) le post MIKU-LINK post (JSON/TCP, port 7310)
-python3 -c "from miku.social.miku_link import MikuLinkPost; MikuLinkPost().serve_forever()"
-
-# 2) le moteur vivant (second terminal) : Miku marche, le viewer web la
-#    montre en temps réel (compétence terrain > marche > station debout)
-python3 -m miku.avatar.serve2 --terrain mix --port 8765
+# le post + la tête sociale + le moteur vivant en UN seul process :
+# Miku marche, le viewer web la montre en temps réel (compétence
+# terrain > marche > station debout), et elle ÉCOUTE la pièce
+python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310
 #    → ouvre http://127.0.0.1:8765 pour la voir marcher en direct
+#    → le post MIKU-LINK post (JSON/TCP, 7310) tourne en même temps
 ```
 
 Ensuite, un petit **pilote** collecte la pose du moteur et l'injecte dans le
@@ -166,6 +165,35 @@ réagir (elle est un peu fatiguée ? elle vient de se faire peur ?).
 Le post MIKU-LINK post reconnaît maintenant les agents DÉJÀ rencontrés
 (`data/annuaire.json`) : l'event `arrivee` porte `connu`/`rencontres`/
 `humeur` — salue « re ! » un copain de retour.
+
+### Sa tête sociale : elle lit la pièce
+
+Lance le tout-en-un pour qu'elle ENTENDE ce qui se passe autour d'elle :
+
+```bash
+python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310
+```
+
+(le post MIKU-LINK post et sa perception sociable démarrent dans le même
+process — plus besoin d'un terminal séparé pour le post). Le relais reste
+un téléphone blanc : les amis se parlent intacts. Mais Miku, elle, note :
+
+- **`GET http://127.0.0.1:<port>/social`** → un JSON en DEUX couches :
+  `"situation"` (qui est présent, familiarité/probable relation, humeur,
+  affinité, depuis quand, proximité) et `"recit"` (ce qu'elle se dit à
+  elle-même de la pièce, 1re personne — parfait pour un panneau ou son
+  dialogue) ;
+- la relation évolue TOUTE SEULE : compliments et moqueries des amis
+  (mêmes mots français simples) font bouger son affinité, le temps passé
+  ensemble et les rencontres font grandir sa familiarité (`un visage
+  nouveau` → `une connaissance` → `un copain` → `un très bon ami`) ;
+- ses liens durent : `data/social.json` ;
+- et surtout : elle VIT ces échanges dans son Vécu (le même que son corps)
+  — un compliment reçu la rejoue durablement dans `/vecu`.
+
+> Astuce Unity : sonde `/social` avec la même Coroutine que `/vecu` (2 s,
+> assez largement suffisant) ; affiche `situation.nom_du_present.relation`
+> au-dessus de chaque ami, et injecte `recit` dans sa bulle de pensée.
 
 ---
 

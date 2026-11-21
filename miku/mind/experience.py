@@ -42,10 +42,20 @@ class Vécu:
 
     # ------------------------------------------------------------------
     def on_episode(self, info):
-        """Appelé en coulisses après chaque épisode physique.
-        info = {lieu, pas, distance, chute, penche, record_avant, record}
+        """Appelé en coulisses après chaque épisode vécu (physique OU social).
+        info = {lieu, pas, distance, chute, penche, record_avant, record}.
+        Un événement SOCIAL passera en plus "recit" (+ "emotion" et
+        "valence") : la personne qui l'a vécu raconte avec SES mots, on ne
+        rejoue pas l'analyse du corps sur du vécu de la tête.
         -> renvoie l'entrée, l'ajoute au journal."""
-        emotion, valence, recit = self._éprouve(info)
+        if info.get("recit") is not None:
+            # déjà éprouvé et raconté par la source (perception sociale...) :
+            # on enregistre tel quel, sans ré-interpréter.
+            emotion = info.get("emotion") or "calme"
+            valence = float(info.get("valence", 0.0))
+            recit = info["recit"]
+        else:
+            emotion, valence, recit = self._éprouve(info)
         entry = {
             "moment": time.strftime("%H:%M:%S"),
             "lieu": info.get("lieu", "chez moi"),
@@ -54,12 +64,16 @@ class Vécu:
             "recit": recit,
         }
         self.entries.append(entry)
-        # oubli naturel : on ne garde que les moments récents ET les moments
-        # forts (record/peur) — la mémoire sélective d'une humaine.
-        forts = [e for e in self.entries
-                 if abs(e.get("valence", 0)) > 0.25]
-        communs = [e for e in self.entries if abs(e.get("valence", 0)) <= 0.25]
-        self.entries = (forts[-150:] + communs[-150:])[-self.MAX_ENTRIES:]
+        # oubli naturel, SANS mélanger le fil du temps : le journal reste
+        # chronologique (le compliment de tout à l'heure ne doit pas
+        # passer après la balade de maintenant). Quand le journal déborde,
+        # les vieux moments COMMUNS s'estompent d'abord ; les moments
+        # forts (compliment vécu, chute, record) résistent plus longtemps.
+        if len(self.entries) > self.MAX_ENTRIES:
+            recents = self.entries[-150:]
+            vieux_forts = [e for e in self.entries[:-150]
+                           if abs(e.get("valence", 0)) > 0.25][-150:]
+            self.entries = vieux_forts + recents
         self._save()
         return entry
 
