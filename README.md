@@ -125,6 +125,15 @@ amis partent intacts, zéro filtrage), mais Miku L'ENTEND :
   4e fois que nos chemins se croisent`) ;
 - **Ce qu'ils ressentent** : les émotes ET les mots affectifs de leurs
   messages (lexique français from scratch) ;
+- **Les menaces, même masquées** : « je vais te tuer » est repéré (mes
+  mots de danger, comparés MOT ENTIER — « attitude » ne piège pas), et les
+  sous-entendus aussi (`« tu as l'air gentille... trop gentille. »`) — une
+  menace tombe son affinité de 0.6 (une moquerie de 0.1) et la fait
+  VIVRE la peur (Vécu : « j'ai senti mon cœur se serrer ») ;
+- **Deux couches distinctes** : ce que L'AGENT exprime (ses « je » à lui :
+  « j'ai peur » → il exprime l'inquiet) vs ce que ça fait à MIKU
+  (blessée/effrayée) — finies les confusions du genre « il a l'air
+  d'être agressée » quand c'est elle qu'on insulte ;
 - **L'affinité** (-1..+1) : mémoire lente des échanges — un compliment
   compte, une moquerie aussi, mais un désaccord n'efface pas une amitié
   (fusion 0.9/0.1, elle pardonne sans tout oublier) ;

@@ -38,11 +38,35 @@ class TestLectureMessages(unittest.TestCase):
         self.assertGreater(v, 0.5)
 
     def test_emotion_deduite(self):
+        """_emotion_texte décrit comment LUI paraît (PAS Miku)."""
         from miku.social.perception import _emotion_texte
-        self.assertEqual(_emotion_texte("tu es tellement nulle"), "agressée")
-        self.assertEqual(_emotion_texte("j'ai un peu peur"), "inquiète")
+        self.assertEqual(_emotion_texte("tu es tellement nulle"), "agressive")
+        self.assertEqual(_emotion_texte("j'ai un peu peur"), "inquiet")
         self.assertEqual(_emotion_texte("trop bien joué !"), "contente")
         self.assertEqual(_emotion_texte("tu viens d'où ?"), "curieuse")
+
+    def test_menace_explicite(self):
+        """« je vais te tuer » : aucun insulte, MAIS danger détecté."""
+        v = _valence_texte("je vais te tuer.")
+        self.assertLess(v, -0.6)
+        from miku.social.perception import _emotion_texte
+        self.assertEqual(_emotion_texte("mets-toi devant mon couteau"),
+                         "menaçante")
+
+    def test_menace_masquee_chara(self):
+        """La menace par sous-entendu : aucun mot méchant, pourtant..."""
+        self.assertLess(_valence_texte(
+            "tu as l'air gentille... trop gentille."), -0.5)
+        self.assertLess(_valence_texte(
+            "tu sais ce qui arrive aux gens trop gentils ?"), -0.5)
+        self.assertLess(_valence_texte(
+            "personne ne t'entendrait crier de toute façon"), 0)
+
+    def test_mot_innocent_pas_confondu(self):
+        """« attitude » ne déclenche PAS la menace contenant « tue »."""
+        self.assertGreater(_valence_texte(
+            "j'aime ton attitude, super !"), 0.4)
+        self.assertEqual(_valence_texte("on m'a dit bonjour"), 0.15)
 
 
 class TestLiensEtFamiliartite(unittest.TestCase):
@@ -116,10 +140,33 @@ class TestVécuSocial(unittest.TestCase):
                                  and os.remove(self.tmp)))
         self.vécu = v
 
+    def test_menace_effraie_pour_de_vrai(self):
+        """Une menace se vit DANS le corps (Vécu) et pèse sur l'affinité."""
+        self.p.on_chat("CHARA", "je vais te tuer.")
+        self.assertTrue(any("inquiétant" in e["recit"]
+                            for e in self.vécu.entries))
+        l = self.p.liens["CHARA"]
+        self.assertEqual(l.ressenti, "effrayée")
+        # une menace pèse 0.6 (coeff) : elle part vite dans le profond
+        self.assertLess(l.affinite, -0.4)
+
+    def test_insulte_ne_change_pas_son_humeur_a_lui(self):
+        """Si CHARA insulte, c'est MIKU qui est blessée — CHARA, lui,
+        garde l'humeur qu'il exprimait (bug « il a l'air d'être agressée »)."""
+        self.p.on_emote("CHARA", "amuse")
+        l = self.p.on_chat("CHARA", "tu es nulle et stupide")
+        self.assertEqual(l.humeur, "amuse")   # lui, il s'amuse
+        self.assertEqual(l.ressenti, "blessée")  # elle, elle souffre
+
+    def test_maladie_de_l_autre_perçue(self):
+        """« j'ai peur » de LUI : sa propre peur, pas la mienne."""
+        l = self.p.on_chat("NOVA-01", "j'ai un peu peur dans ce noir...")
+        self.assertEqual(l.humeur, "inquiet")
+
     def test_compliment_vit_dans_le_vecu(self):
         self.p.on_chat("NOVA-01", "félicitations, tu es incroyable !")
-        self.assertIn("gentil", self.vécu.entries[-1]["recit"])
-        self.assertEqual(self.vécu.entries[-1]["lieu"], "la pièce")
+        self.assertIn("gentil", self.vécu.derniers(1)[0]["recit"])
+        self.assertEqual(self.vécu.derniers(1)[0]["lieu"], "la pièce")
 
     def test_blessure_vit_dans_le_vecu(self):
         self.p.on_chat("GRIM-09", "tu es nulle, franchement")

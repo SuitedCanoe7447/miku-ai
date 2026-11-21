@@ -44,6 +44,31 @@ NÉGATIFS = {
     "bete", "moche", "horrible", "inutile", "pourris", "pourrie", "grr",
     "rage", "harcel", "méchante", "mechante", "mauvaise",
 }
+# MENACES : mots dangereux (mêmes sans insulte). « Tue » est court → il ne
+# compte QUE comme mot entier (un « attitude » ne doit jamais déclencher).
+MENACES = {
+    "tue", "tueuse", "tuer", "meurs", "meurt", "mourir", "couteau",
+    "couteaux", "poignard", "hache", "sang", "disparais", "disparaître",
+    "disparaitre", "souffrir", "souffres", "souffre", "pleurer", "pleures",
+    "brûle", "bruler", "brûler", "étouffe", "étrangle", "griffe", "crains",
+}
+# MENACES MASQUÉES : la méchanceté par sous-entendu — aucun mot méchant,
+# pourtant la nuque frissonne (le pire cas de figure, genre Chara).
+MENACES_MASQUEES = (
+    "trop gentil", "trop gentille", "trop sage", "trop douce", "trop naïve",
+    "trop naïf", "trop confiant", "ce qui va t'arriver", "ce qui arrive à",
+    "ce qui arrive aux", "tu sais ce qui", "personne ne te croira",
+    "personne ne t'entend", "personne ne te cherchera", "tu n'existe pas",
+    "n'aie pas peur", "ne pleure pas", "tout se passera bien", "dors bien",
+    "compte jusqu'à", "à toi de jouer",
+)
+# Ce que LUI ressent (ses phrases en « je » — son mal à lui, pas notre retro).
+SE_SENT_MAL = (
+    "j'ai peur", "j'ai mal", "j'ai faim", "j'ai sommeil", "j'ai froid",
+    "j'ai chaud", "j'ai honte", "je suis triste", "je suis fatigu",
+    "je suis seul", "je suis seule", "je me sens mal", "je m'ennuie",
+    "j'en ai marre", "je déprime",
+)
 MALADES = {
     "fatigu", "ennui", "m'ennuie", "triste", "mal", "peur",
     "inquiet", "inquiète", "inquiete", "déprim", "deprim", "seul", "seule",
@@ -60,34 +85,91 @@ def _sans_politesse(t):
     for s in sorted(SALUTATIONS | ADIEUX, key=len, reverse=True):
         if " " in s or len(s) > 3:
             t = t.replace(s, " ")
-    return " ".join(m.strip(".,!?;:") for m in t.split())
+    return " ".join(m.strip(".,!?;:…") for m in t.split())
+
+
+def _contient(t, mots, tnp=None):
+    """Un mot du lexique est-il là ? Par MOT ENTIER (radical inclus :
+    « tue » attrape « tuer », « nul » attrape « nulle ») — pour ne pas
+    retomber dans l'ancien piège où « re » mangeait un « merci »."""
+    if tnp is None:
+        tnp = t
+    for m in mots:
+        if " " in m:
+            if m in t or m in tnp:
+                return True
+        else:
+            for w in tnp.split():
+                if w.strip(".,!?;:…").startswith(m):
+                    return True
+    return False
+
+
+def _lit_texte(texte):
+    """La LECTURE fine d'un message (from scratch). Renvoie tout ce qu'on
+    y décode d'un coup, décodé en couches séparées :
+      - valence (-1..+1) : le ton global, pour la mémoire affective ;
+      - il_exprime : CE QUE LUI ressent (ses « je » à lui) ;
+      - miku_ressenti : CE QUE ÇA LUI A FAIT (agréable / blessée / peur) ;
+      - menace : True s'il y a du danger explicite OU masqué."""
+    t = (texte).lower() if isinstance(texte, str) else ""
+    tnp = _sans_politesse(t)
+    plus = sum(1 for m in POSITIFS if _contient(t, (m,), tnp))
+    moins = sum(1 for m in NÉGATIFS if _contient(t, (m,), tnp))
+    menace = (_contient(t, MENACES, tnp)
+              or any(p in t for p in MENACES_MASQUEES))
+    v = 0.6 * (plus - moins)
+    if not plus and not moins:
+        accueil_polite = any(p in t for p in SALUTATIONS
+                        if len(p) > 3 or " " in p)
+        au_revoir = any(p in t for p in ADIEUX if len(p) > 3 or " " in p)
+        if accueil_polite:
+            v = 0.15                      # accueillir : doux, mais léger
+        elif au_revoir:
+            v = -0.05                     # un départ, un petit pincement
+    if "?" in (texte or ""):
+        v += 0.1                      # une question, c'est de l'intérêt
+    if "!" in (texte or "") and plus:
+        v += 0.1                      # enthousiasme
+    if menace:
+        v = min(v, -0.7)              # le danger passe AVANT tout le reste
+    # --- ce que ça lui a fait (à Miku) :
+    if menace:
+        ressenti = "effrayée"
+    elif v <= -0.3:
+        ressenti = "blessée"
+    elif v >= 0.3:
+        ressenti = "ça fait du bien"   # (pas une humeur : un soulagement)
+    else:
+        ressenti = ""
+    # --- ce que LUI exprime (ses phrases en « je » à LUI) :
+    if (("j'ai" in t or "je suis" in t or "je me" in t or "j'en ai" in t)
+            and _contient(t, SE_SENT_MAL + tuple(MALADES), tnp)):
+        exprime = ("inquiet" if _contient(t, ("peur", "inquiet"))
+                   else "triste")
+    else:
+        exprime = ""
+    return {"valence": max(-1.0, min(1.0, v)), "il_exprime": exprime,
+            "miku_ressenti": ressenti, "menace": menace}
 
 
 def _valence_texte(texte):
-    """Petite lecture affective d'un message (from scratch) : -1..+1."""
-    t = (texte or "").lower()
-    plus = sum(1 for m in POSITIFS if m in _sans_politesse(t))
-    moins = sum(1 for m in NÉGATIFS if m in t)
-    v = 0.6 * (plus - moins)
-    if not plus and not moins:
-        if any(s in t for s in SALUTATIONS):
-            v = 0.15                      # accueillir : doux, mais léger
-        elif any(s in t for s in ADIEUX):
-            v = -0.05                     # un départ, un petit pincement
-    if "?" in texte:
-        v += 0.1                      # une question, c'est de l'intérêt
-    if "!" in texte and plus:
-        v += 0.1                      # enthousiasme
-    return max(-1.0, min(1.0, v))
+    """Le ton global d'un message : -1..+1 (résumé de la lecture fine)."""
+    return _lit_texte(texte)["valence"]
 
 
 def _emotion_texte(texte):
-    t = (texte or "").lower()
-    if any(m in t for m in NÉGATIFS):
-        return "agressée"
-    if any(m in t for m in MALADES):
-        return "inquiète"
-    if any(m in t for m in POSITIFS):
+    """Comment LUI paraît s'exprimer dans ce message (PAS ce que Miku
+    ressent — ça, c'est `miku_ressenti` de `lit_texte`)."""
+    d = _lit_texte(texte)
+    if d["menace"]:
+        return "menaçante"
+    if d["il_exprime"]:
+        return d["il_exprime"]
+    t = (texte).lower() if isinstance(texte, str) else ""
+    if _contient(t, NÉGATIFS):
+        return "agressive"
+    if _contient(t, POSITIFS):
         return "contente"
     if "?" in (texte or ""):
         return "curieuse"
@@ -107,7 +189,8 @@ class Lien:
         self.mots = 0
         self.questions = 0
         self.exclamations = 0
-        self.humeur = ""             # dernière humeur exprimée (emote)
+        self.humeur = ""             # ce qu'il EXPRIME (emote, ses « je »)
+        self.ressenti = ""           # ce que ça a fait à MIKU (dernier échange)
         self.affinite = 0.0          # -1..+1, mémoire lente des échanges
         self.dernier_echange = None  # (ts, texte)
         self.x = None                # position perçue (monde Unity)
@@ -154,6 +237,7 @@ class PerceptionSociale:
                         l.messages = d.get("messages", 0)
                         l.affinite = d.get("affinite", 0.0)
                         l.humeur = d.get("humeur", "")
+                        l.ressenti = d.get("ressenti", "")
                         self.liens[nom] = l
         except (OSError, json.JSONDecodeError):
             self.liens = {}
@@ -212,24 +296,38 @@ class PerceptionSociale:
 
     def on_chat(self, agent, texte):
         l = self._lien(agent)
+        ttxt = texte or ""
         l.messages += 1
-        l.mots += len((texte or "").split())
-        l.questions += texte.count("?")
-        l.exclamations += texte.count("!")
-        v = _valence_texte(texte)
+        l.mots += len(ttxt.split())
+        l.questions += ttxt.count("?")
+        l.exclamations += ttxt.count("!")
+        d = _lit_texte(ttxt)
+        v = d["valence"]
         # mémoire AFFECTIVE lente : les compliments comptent, les attaques
-        # aussi, mais un désaccord n'efface pas une amitié (0.9 gardé)
-        l.affinite = round(max(-1.0, min(1.0, 0.9 * l.affinite + 0.1 * v)), 3)
-        l.dernier_echange = (time.time(), texte)
-        l.humeur = _emotion_texte(texte) or l.humeur
+        # aussi, MAIS le danger pèse lourd (une menace ne se pardonne pas
+        # comme un mot de trop : coefficient 0.6 au lieu de 0.1)
+        coeff = 0.6 if d["menace"] else 0.1
+        l.affinite = round(max(-1.0, min(1.0,
+                        (1 - coeff) * l.affinite + coeff * v)), 3)
+        l.dernier_echange = (time.time(), ttxt)
+        if d["il_exprime"]:
+            l.humeur = d["il_exprime"]       # ses « je » à LUI
+        elif not d["menace"] and not d["miku_ressenti"]:
+            pass                             # rien de neuf : il garde la sienne
+        l.ressenti = d["miku_ressenti"] or l.ressenti
         self._sauve()
-        if v > 0.5:
+        if d["menace"]:
+            self._vit(f"{agent} a dit quelque chose d'inquiétant "
+                      f"(« {ttxt} »). J'ai senti mon cœur se serrer — "
+                      f"je ne m'approche plus.", "effrayée",
+                      max(-0.85, v - 0.1))
+        elif v > 0.5:
             self._vit(f"{agent} m'a dit quelque chose de très gentil "
-                      f"(« {texte} »). Ça m'a fait chaud au cœur.",
+                      f"(« {ttxt} »). Ça m'a fait chaud au cœur.",
                       "contente", min(0.6, 0.3 + 0.3 * v))
         elif v < -0.5:
             self._vit(f"{agent} m'a dit quelque chose de méchant "
-                      f"(« {texte} »). Ça m'a fait de la peine.",
+                      f"(« {ttxt} »). Ça m'a fait de la peine.",
                       "triste", max(-0.6, 0.3 * v))
         return l
 
@@ -265,7 +363,8 @@ class PerceptionSociale:
         """Le tableau vivant (données — pour l'orchestrateur/UI)."""
         pres = {l.nom: {"familiarité": l.familiarite,
                         "relation": l.relation,
-                        "humeur": l.humeur,
+                        "exprime": l.humeur,
+                        "ressenti": l.ressenti,
                         "affinité": l.affinite,
                         "depuis_s": (round(time.time() - l.arrive_a)
                                      if l.arrive_a else 0),
@@ -291,12 +390,16 @@ class PerceptionSociale:
                        if minutes >= 1 else "tout juste là")
             else:
                 dep = "de retour"
-            hum = f", il a l'air d'être {l.humeur}" if l.humeur else ""
+            hum = f", il a l'air {l.humeur}" if l.humeur else ""
             aff = ""
+            if l.ressenti == "effrayée":
+                aff = " — la dernière fois, il m'a fait peur : je reste sur mes gardes"
+            elif l.ressenti == "blessée":
+                aff = " — ses mots m'ont fait mal, je m'en méfie"
             if l.affinite > 0.3:
-                aff = " — il m'apprécie, et ça me plaît"
+                aff += " — il m'apprécie, et ça me plaît"
             elif l.affinite < -0.3:
-                aff = " — j'ai aperçu la méchanceté chez lui, je reste prudente"
+                aff += " — j'ai aperçu la méchanceté chez lui, je reste prudente"
             phrases.append(f"{l.nom} est {dep} ({l.relation}){hum}{aff}.")
         c = self.centre_de_la_conversation()
         if c and (len(pres) > 1 or c.messages > 3):
@@ -312,7 +415,8 @@ class PerceptionSociale:
                                "temps_present": round(l.temps_present, 1),
                                "messages": l.messages,
                                "affinite": l.affinite,
-                               "humeur": l.humeur}
+                               "humeur": l.humeur,
+                               "ressenti": l.ressenti}
                            for n, l in self.liens.items()}, f,
                           ensure_ascii=False, indent=1)
         except OSError:
