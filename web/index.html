@@ -59,7 +59,36 @@ new GLTFLoader().load('/model.glb', (gltf)=>{
   document.getElementById('mode').textContent = 'prête';
 }, undefined, (e)=>{ document.getElementById('mode').textContent = 'erreur chargement : '+e; });
 
-// posture (angles en degrés) -> rotations locales des os
+// ------------------------------ sol 3D (ruban de terrain) -------
+const GROUND_N = 41;
+const gGeo = new THREE.BufferGeometry();
+gGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(GROUND_N*2*3), 3));
+const gIdx = [];
+for(let i=0;i<GROUND_N-1;i++){ const a=i*2; gIdx.push(a,a+1,a+2, a+1,a+3,a+2); }
+gGeo.setIndex(gIdx);
+const gMat = new THREE.MeshStandardMaterial({color:0x2a4436, side:THREE.DoubleSide});
+const groundRibbon = new THREE.Mesh(gGeo, gMat);
+groundRibbon.visible = false;
+scene.add(groundRibbon);
+
+function updateGround(prof, xm){
+  groundRibbon.visible = true;
+  ground.visible = false; grid.visible = false;   // sol plat masqué
+  const pos = gGeo.attributes.position.array;
+  for(let i=0;i<GROUND_N;i++){
+    const [gx, gh] = prof[i];
+    pos[i*6+0] = gx - xm;      // x relatif au corps (le ruban suit)
+    pos[i*6+1] = gh;
+    pos[i*6+2] = 0.8;
+    pos[i*6+3] = gx - xm;
+    pos[i*6+4] = gh;
+    pos[i*6+5] = -0.8;
+  }
+  gGeo.attributes.position.needsUpdate = true;
+  gGeo.computeVertexNormals();
+}
+
+// posture (angles en degrés, produite par la politique APPRISE)
 function applyPose(p){
   if (!model || !rig) return;
   const D2R = Math.PI/180;
@@ -67,7 +96,6 @@ function applyPose(p){
     const b = buttons[rig[role]];
     if (b && deg!==undefined) b.rotation[ax] = deg*D2R;
   };
-  // rotations autour de l'axe latéral local (z local = ligne de Hanche)
   if (p.legs){
     set('hipL','z', -(p.legs.L?.hip||0));
     set('kneeL','z', -(p.legs.L?.knee||0));
@@ -85,7 +113,14 @@ function applyPose(p){
   if (p.hips && buttons[rig['pelvis']] && pelvisY!==null){
     buttons[rig['pelvis']].position.y = pelvisY + (p.hips.lift||0);
   }
-  if (p.spine) set('spine','x', 0);
+  // déplacement réel appris + terrain
+  if (p.cm){
+    model.position.x = 0;                    // le corps reste au centre...
+    ground.position.set(0,0,0);
+    if (p.ground) updateGround(p.ground, p.cm[0]);  // ...et le sol défile
+    // caméra qui suit doucement
+    controls.target.lerp(new THREE.Vector3(0, 1.1, 0), 0.03);
+  }
 }
 
 function fetchPose(){

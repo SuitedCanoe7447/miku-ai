@@ -29,12 +29,16 @@ PATH = os.path.join("data", "journal.json")
 class Vécu:
     """Journal autobiographique à la première personne."""
 
+    MAX_ENTRIES = 300          # journal rotatif : elle oublie, comme tout
+                               # le monde (les vieux moments s'estompent)
+
     def __init__(self, path=PATH):
         self.path = path
         self.entries = []
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 self.entries = json.load(f).get("entrees", [])
+        self._derniere_sauvegarde = 0.0
 
     # ------------------------------------------------------------------
     def on_episode(self, info):
@@ -50,10 +54,38 @@ class Vécu:
             "recit": recit,
         }
         self.entries.append(entry)
-        if len(self.entries) > 500:
-            self.entries = self.entries[-500:]
+        # oubli naturel : on ne garde que les moments récents ET les moments
+        # forts (record/peur) — la mémoire sélective d'une humaine.
+        forts = [e for e in self.entries
+                 if abs(e.get("valence", 0)) > 0.25]
+        communs = [e for e in self.entries if abs(e.get("valence", 0)) <= 0.25]
+        self.entries = (forts[-150:] + communs[-150:])[-self.MAX_ENTRIES:]
         self._save()
         return entry
+
+    # ------------------------------------------------------------------
+    def humeur(self):
+        """Humeur COURANTE dérivée de ses derniers moments vécus (1re
+        personne) : elle persiste, déteint sur sa façon de parler, et se
+        lit depuis Unity via /vecu. {emotion, valence, energie, phrase}"""
+        if not self.entries:
+            return {"emotion": "calme", "valence": 0.0, "energie": 0.8,
+                    "phrase": "Allons-y."}
+        recentes = self.entries[-3:]
+        mu = sum(e["valence"] for e in recentes) / len(recentes)
+        emotion = recentes[-1]["emotion"]
+        # énergie : une série d'expériences positives dynamise ; des échecs
+        # rapprochés fatiguent (elle aura besoin d'une pause).
+        energie = max(0.2, min(1.0, 0.6 + 0.4 * mu))
+        if mu > 0.35:
+            phrase = "Je me sens vraiment bien là."
+        elif mu < -0.25:
+            phrase = ("Je fatigue un peu... j'enchaîne beaucoup d'essais "
+                      "qui ne finissent pas toujours bien.")
+        else:
+            phrase = "Ça va, je continue à apprivoiser mon corps."
+        return {"emotion": emotion, "valence": round(mu, 3),
+                "energie": round(energie, 3), "phrase": phrase}
 
     # ------------------------------------------------------------------
     def _éprouve(self, info):
@@ -152,8 +184,14 @@ class Vécu:
         return (f"Je me souviens de {n} moments passés à apprivoiser mon corps "
                 f"({chutes} chutes, {records} records battus).")
 
-    def _save(self):
+    def _save(self, force=False):
+        # PERF : au plus une écriture disque/seconde (l'entraînement crée
+        # beaucoup d'épisodes — le disque n'a pas besoin de tout voir).
+        now = time.time()
+        if not force and now - self._derniere_sauvegarde < 1.0:
+            return
+        self._derniere_sauvegarde = now
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         with open(self.path, "w", encoding="utf-8") as f:
-            json.dump({"entrees": self.entries[-500:]}, f,
+            json.dump({"entrees": self.entries}, f,
                       ensure_ascii=False, indent=1)

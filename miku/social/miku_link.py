@@ -19,8 +19,10 @@ Types v1.1 :
   bye     {}
 """
 import json
+import os
 import socket
 import threading
+import time
 
 
 class MikuLinkPost:
@@ -36,6 +38,37 @@ class MikuLinkPost:
         # Relais par défaut : chat/gesture/emote/FED sont FORWARDS à tous les        # autres agents. Ainsi deux IA amies se parlent SANS que le post
         # modifie quoi que ce soit — aucune n'intercepte, aucune ne filtre.
         self.relais = {"chat", "gesture", "emote", "fed"}
+        self.MAX_CLIENTS = 32          # une pièce, pas un stade (sécurité)
+        self.MAX_LIGNE = 256 * 1024    # anti-flood : ligne JSON max valide
+        # ANNURAIRE PERSISTANT (souvenirs sociaux) : nom -> {rencontres,
+        # dernier_vu, humeur}. Quand un connu revient, tout le monde le voit
+        # signalé — comme retrouver un copain de classe au café.
+        self.annuaire_path = os.path.join(os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "data", "annuaire.json")
+        self.annuaire = {}
+        try:
+            if os.path.exists(self.annuaire_path):
+                with open(self.annuaire_path, encoding="utf-8") as f:
+                    self.annuaire = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            self.annuaire = {}
+
+    def _souvenir(self, agent, humeur=None, rencontre=False):
+        """Retourne le souvenir d'un agent (et l'enrichit)."""
+        s = self.annuaire.setdefault(
+            agent, {"rencontres": 0, "dernier_vu": None, "humeur": ""})
+        if rencontre:
+            s["rencontres"] += 1
+            s["dernier_vu"] = time.strftime("%Y-%m-%d %H:%M")
+        if humeur:
+            s["humeur"] = humeur
+        try:
+            with open(self.annuaire_path, "w", encoding="utf-8") as f:
+                json.dump(self.annuaire, f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+        return s
 
     # ------------------------------------------------------------------
     def on(self, type_msg, fn):
@@ -69,18 +102,21 @@ class MikuLinkPost:
     def _client_thread(self, conn):
         buf = b""
         try:
+            conn.settimeout(300)          # client silencieux 5 min = ping ?
             while True:
                 data = conn.recv(65536)
                 if not data:
                     break
                 buf += data
+                if len(buf) > self.MAX_LIGNE:     # anti-flood : on coupe
+                    break
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     if not line.strip():
                         continue
                     try:
                         msg = json.loads(line.decode("utf-8"))
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         self.send(conn, "erreur", erreur="json invalide")
                         continue
                     self._route(conn, msg)
@@ -96,17 +132,38 @@ class MikuLinkPost:
             self.log = self.log[-1000:]
         if t == "hello":
             with self.lock:
+                if len(self.clients) >= self.MAX_CLIENTS:
+                    self.send(conn, "erreur", erreur="post complet")
+                    raise OSError("trop de clients")   # -> _drop propre
                 self.clients[conn] = msg
-            # le nouvel agent est présenté aux autres (annuaire vivant)
-            self.broadcast("arrivee", sauf=conn, agent=msg.get("agent", "?"),
-                           perception=msg.get("perception", ""))
-            # et l'annuaire des présents lui est envoyé
+            nom = msg.get("agent", "?")
+            souv = self._souvenir(nom, rencontre=True)
+            connu = souv["rencontres"] > 1
+            # le nouvel agent est présenté aux autres (annuaire vivant),
+            # avec la mention « re » s'il est déjà passé ici — la vie sociale
+            # a une mémoire, ce n'est pas un telephone anonyme.
+            self.broadcast("arrivee", sauf=conn, agent=nom,
+                           perception=msg.get("perception", ""),
+                           connu=connu, rencontres=souv["rencontres"],
+                           humeur=souv.get("humeur", ""))
+            # et l'annuaire des présents lui est envoyé (avec l'ultima
+            # humeur connue de chacun : il SAIT dans quelles humeurs il entre)
             for info in self.clients.values():
-                if info is not self.clients.get(conn):
-                    self.send(conn, "arrivee", agent=info.get("agent", "?"),
-                              perception=info.get("perception", ""))
+                if info is self.clients.get(conn):
+                    continue
+                autre = info.get("agent", "?")
+                s2 = self.annuaire.get(autre, {})
+                self.send(conn, "arrivee", agent=autre,
+                          perception=info.get("perception", ""),
+                          connu=s2.get("rencontres", 0) > 0,
+                          rencontres=s2.get("rencontres", 0),
+                          humeur=s2.get("humeur", ""))
         elif t in self.relais:
-            # relais neutre à tous les AUTRES agents (chat entre IA amies)... 
+            if t == "emote":
+                # mémoire affective : je me souviens de qui paraissait quoi
+                self._souvenir(msg.get("agent", msg.get("de", "?")),
+                               humeur=msg.get("emotion", ""))
+            # relais neutre à tous les AUTRES agents (chat entre IA amies)...
             self.broadcast(t, sauf=conn, **{k: v for k, v in msg.items()
                                             if k != "type"})
         fn = self.handlers.get(t)

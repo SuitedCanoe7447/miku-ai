@@ -15,7 +15,7 @@ avec skinning CPU de validation — zéro outil de modélisation externe.
 | `miku/avatar/png.py` | Encodeur PNG from scratch (validation par rendu CPU) |
 | `web/index.html` | Viewer three.js : sol, grille, caméra orbitale, pose appliquée via `rig_map.json` |
 | `model_raw/` | FBX source extrait + `miku_megamix.glb` (généré) |
-| `tests/test_avatar_model.py` | 12 tests (parseur, extract, to_meters, GLB, rig) |
+| `tests/` | 18 tests (parseur, extract, to_meters, GLB, rig + vie : humeur, oubli, annuaire social, anti-flood) |
 
 ## Point mathématique clé : `to_meters`
 
@@ -52,9 +52,32 @@ python3 -m unittest tests.test_avatar_model
   linéaires sur l'état réel. Paramètres 100% appris.
 - **ES-CEM** (`miku/es.py`) : entropie croisée, élites 25%, std floor 0.02,
   cap sigma 1.2.
-- Résultats (apprentissage de quelques secondes à quelques minutes) :
-  debout 400/400 pas ; marche 27 m/400 pas sans chute (~3 m/s) ;
-  plat + relief stabilisés, pentes/escaliers en cours de curriculum.
+- **Curriculum terrain — SCORE TERRAIN : 8/8** (éval 350 pas, 3 essais) :
+
+  | Terrain        | fit   | | Terrain        | fit   |
+  |----------------|-------|-|----------------|-------|
+  | plat           | 20.1  | | esc montée 0.12| 24.1  |
+  | pente +0.15    | 24.0  | | esc montée 0.16| 25.3  |
+  | pente +0.22    | 24.9  | | esc descente   | 23.9  |
+  | pente −0.18    | 16.3  | | relief 0.05    | 19.9  |
+
+- **La clé physique qui a débloqué les pentes : la stratégie de cheville.**
+  Le `lean` était un pendule purement passif — sur pente, la perturbation
+  de pente le faisait dériver sans possibilité de compensation : CHUTE
+  GARANTIE ~1 s (mathématiquement inexorable, confirmé par 3 essais :
+  warm start, panel + min, initialisation fraîche, pop 64 : plateau ≤ 3.1).
+  La correction (physiologie réelle, pas une pose pré-faite) : les
+  chevilles en appui forment un RESSORT qui cible le buste
+  (`K_CHEV`, stratégie d'équilibre humaine). Résultat : tenir debout sur
+  une pente devient naturel ET contrôlable, marcher sur TOUT devient
+  apprenable (passer de fit ~1.9 à ~25 sur chaque terrain).
+- Curriculum final (`train_terrain`) : 4 phases (douce → raide), panel
+  fixe par famille + familles dures comptant double, score unifié
+  `2·survie + 0.4·gain` (survivre = 2.0 PARTOUT : le plat ne noie plus
+  les pentes), droit de veto du pire cas, filet anti-régression
+  (snapshot du meilleur évalué toutes les 15 gen).
+- PERF : état physique préalloué (~22k pas/s, zéro allocation par pas),
+  compétences en float32, moteur live 30 Hz (polling illimité sans surcoût), profil sol recalculé tous les 5 cm.
 
 ## Le vécu (couche subjective)
 
@@ -63,6 +86,34 @@ laboratoire (populations, fitness, générations). Chaque épisode physique
 est transformé en expérience vécue à la première personne par
 `miku/mind/experience.py` (peur de tomber, fierté de progresser,
 frustration d'échouer), stockée dans `data/journal.json`.
+
+## Elle vit (15 améliorations « humaine / PC normal / nécessaire »)
+
+**Mieux être humaine (pour elle comme pour les autres) :**
+1. **Humeur persistante** (`Vécu.humeur()`) : moyenne de ses 3 derniers
+   moments vécus → émotion, valence, énergie + une phrase à elle. Elle
+   influe sur sa façon d'être exposée partout (`/pose.humeur`, `/vecu`).
+2. **Fatigue** : après 90 s de marche continue, elle S'ARRÊTE et se repose 6 s
+   (et le vit — entrée de journal).
+3. **Contemplation** : toutes les 45-80 s, elle s'arrête 2 s pour regarder au
+   loin. Elle se relève après une chute et VIT ce nouveau départ (journal).
+4. **Mémoire sociale persistante** (`data/annuaire.json`) : qui elle a
+   rencontré, combien de fois, quand, dans quelle humeur — les agents
+   connus sont salués « re ! » (`arrivee.connu/rencontres`).
+5. **Mémoire affective** : la dernière émotion exprimée par chaque agent
+   (relais `emote`) est retenue et annoncée aux nouveaux arrivants : on
+   entre dans la pièce en sachant dans quelles humeurs.
+
+**PC normal attendu (pas la NASA) :** état physique préalloué,
+compétences float32, pose JSON mise en cache 30 Hz, sol recalculé
+tous les 5 cm, GLB servi depuis la RAM, journal rotatif (300 entrées)
+et sauvegarde throttlée (1/s).
+
+**Nécessaire (solidité) :** sanitisation NaN/Inf (Python ET C#),
+reconnexion automatique d'Unity au post (2 s, sans mourir), garde-fous
+réseau du post (32 clients max, anti-flood 256 Ko, timeout 5 min),
+chargement de compétences validé (dims → fallback propre), `/vecu`
+(son monde intérieur lisible depuis Unity).
 
 ## Pont Unity + IA amies : MIKU-LINK post
 
@@ -82,6 +133,8 @@ frustration d'échouer), stockée dans `data/journal.json`.
 - **Unity** : dépose `unity/MikuLink.cs` sur le GameObject du modèle riggé,
   assigne les 6 os de jambes dans l'inspecteur, le script sonde le sol
   (raycast) et applique les poses reçues. Events C# pour ton UI/son.
+- **Guide complet pas-à-pas** (import GLB, câblage, pilote pose, axes,
+  dépannage, IA amies) : **`docs/UNITY.md`**.
 
 ## État
 

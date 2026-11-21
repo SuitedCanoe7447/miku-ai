@@ -32,6 +32,9 @@ DAMP_BASE = 12.0         # amortissement vertical de base
 DAMP_DEEP = 200.0        # amortissement ajouté si pénétration profonde (réception)
 NORM_PEN = 0.04          # pénétration de référence pour la force max
 K_PENDULE = G / 0.88     # rigidité pendule inversé (chute si pied derrière)
+COUPLE_SOL = 0.0         # (couplage sol testé : trop brutal, désactivé)
+REACTION_HANCHE = 0.0    # (réaction hanches testée : désactivée)
+K_CHEV = 40.0            # stratégie de cheville : ressort buste<->chevilles     # rigidité pendule inversé (chute si pied derrière)
 BUTEE = np.deg2rad(110)  # butée articulaire (genou ne plie pas en arrière !)
 
 # échelles d'angle (rad) : action [-1,1] -> consigne d'angle
@@ -111,6 +114,10 @@ class PlanarBody:
         self.dq = np.zeros(self.nj)
         self.t = 0.0
         self.fallen = False
+        # état préalloué (PERF : zéro allocation par pas, le même buffer est
+        # réécrit — les appelants le lisent immédiatement, ils ne le stockent
+        # jamais d'un pas à l'autre, cf. _ep_walk / _vécu).
+        self._etat = np.zeros(self.dim(), dtype=np.float64)
         # ancre de pied : x du pied AU MOMENT du contact (grip au sol).
         # Un pied posé ne glisse pas : la poussée de marche vient du fait
         # que l'ancre est en avant/areère du bassin (pendule inversé).
@@ -120,13 +127,20 @@ class PlanarBody:
         return 22 + (8 if self.with_arms else 0)
 
     def state(self):
-        base = ([self.x, self.y, self.vx, self.vy, self.lean, self.lean_vel]
-                + self.q[:6].tolist() + self.dq[:6].tolist())
+        """État courant — buffer réutilisé à chaque appel (PERF : la boucle
+        physique tourne ~35 000 pas/s, allouer un array par pas coûtait
+        une grosse part du temps CPU)."""
+        e = self._etat
+        e[0], e[1], e[2], e[3] = self.x, self.y, self.vx, self.vy
+        e[4], e[5] = self.lean, self.lean_vel
+        e[6:12] = self.q[:6]
+        e[12:18] = self.dq[:6]
         cL, cR, kL, kR = self.foot_contacts()
-        s = base + [float(cL), float(cR), float(kL), float(kR)]
+        e[18], e[19], e[20], e[21] = cL, cR, kL, kR
         if self.with_arms:
-            s += self.q[6:].tolist() + self.dq[6:].tolist()
-        return np.array(s, dtype=np.float64)
+            e[22:30] = self.q[6:]
+            e[30:38] = self.dq[6:]
+        return e
 
     # ---------- cinématique ----------
     def _leg_fk(self, hip, knee, ank, cote):
@@ -174,11 +188,18 @@ class PlanarBody:
         actions = np.asarray(actions, dtype=np.float64)
 
         # --- joints : consignes -> premier ordre + vitesse (muscles lisses)
+        reaction_hanches = 0.0
+        cible_chevilles = []                   # stratégie de cheville
         for j in range(min(len(actions), self.nj)):
             cible = float(np.tanh(actions[j])) * ANGLE_SCALES.get(j, 1.0)
             if j in (1, 4):                     # genoux : flexion seulement
                 cible = -abs(cible)
             acc = 90.0 * (cible - self.q[j]) - 12.0 * self.dq[j]
+            if j in (2, 5):                     # chevilles mémorisées
+                cible_chevilles.append(cible)
+            if j in (0, 3):                     # hanches : couple de réaction
+                reaction_hanches -= acc         # fouetter la jambe en avant
+                                                # => le bassin tourne en arrière
             self.dq[j] += acc * dt
             self.q[j] += self.dq[j] * dt
             lim = BUTEE if j in (1, 4) else np.deg2rad(70)
@@ -236,8 +257,24 @@ class PlanarBody:
             s_dist = np.clip(self.terrain.slope(fx_sup, eps=0.08), -0.5, 0.5)
             lean_acc = K_PENDULE * np.sin(self.lean) - 2.0 * self.lean_vel \
                 - 6.0 * s_dist
+            # COUPLAGE POUSSÉE->CORPS (physique réelle) : la force horizontale
+            # s'applique AU NIVEAU DES PIEDS, sous le centre de masse -> elle
+            # crée un couple sur le corps. Sans ce couplage, le lean serait
+            # un pendule purement passif IMPOSSIBLE à contrôler sur pente
+            # (dérive → chute inévitable, aucun apprentissage possible).
+            # C'est ainsi qu'un vrai marcheur se redresse : en poussant sur
+            # le sol, il redresse son buste. Elle devra l'APPRENDRE.
+            lean_acc -= COUPLE_SOL * f_x
         else:
             lean_acc = K_PENDULE * np.sin(self.lean) - 2.0 * self.lean_vel
+            reaction_hanches = 0.0
+            cible_chevilles = [0.0]
+        # STRATÉGIE DE CHEVILLE (physiologie réelle) : les chevilles en appui
+        # font un ressort qui cible le buste sur la consigne d'angle de
+        # cheville. C'est LE mécanisme humain d'équilibre : sur pente, elle
+        # doit APPRENDRE à presser ses chevilles pour tenir le buste droit.
+        lean_acc += K_CHEV * (float(np.mean(cible_chevilles)) - self.lean) \
+            - REACTION_HANCHE * reaction_hanches
         self.lean_vel += lean_acc * dt
         self.lean += self.lean_vel * dt
 

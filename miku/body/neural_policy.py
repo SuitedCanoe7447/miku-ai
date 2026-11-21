@@ -30,7 +30,10 @@ class ParametrizedPolicy:
         return len(self.get_params())
 
     def save(self, path):
-        np.savez(path, params=self.get_params(), meta=np.array([self.n_params]))
+        # PERF : float32 — la moitié de l'empreinte mémoire/disque, aucune
+        # perte perçue pour un CPG (précision utile ~1e-3).
+        np.savez(path, params=self.get_params().astype(np.float32),
+                 meta=np.array([self.n_params]))
 
     def load(self, path):
         d = np.load(path)

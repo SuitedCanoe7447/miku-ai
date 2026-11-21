@@ -58,13 +58,47 @@ public class MikuLink : MonoBehaviour
     void Start()
     {
         _vivant = true;
-        try { Connecter(); } catch (Exception e) { Debug.LogWarning("[MikuLink] post injoignable : " + e.Message); }
+        StartCoroutine(AbstractReconnexion());   // (re)connexion auto en boucle
         StartCoroutine(EnvoyerMonde());
+    }
+
+    /// Nécessaire : si le post Python redémarre (ou n'a pas encore lancé),
+    /// Unity se RECONNECTE tout seul toutes les 2 s au lieu de rester mort.
+    IEnumerator AbstractReconnexion()
+    {
+        while (_vivant)
+        {
+            if (_flux == null)
+            {
+                try
+                {
+                    _client?.Close();
+                }
+                catch { }
+                try
+                {
+                    Connecter();
+                    Debug.Log("[MikuLink] post (re)connecté");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning("[MikuLink] post pas encore là (" + e.Message + "), nouvel essai dans 2 s");
+                }
+            }
+            // la lecture est morte ? elle signale -> prochaine itération reconnecte
+            if (_lireThread != null && !_lireThread.IsAlive)
+            {
+                try { _flux = null; } catch { }
+            }
+            _vivant = Application.isPlaying;
+            yield return new WaitForSeconds(2f);
+        }
     }
 
     void Connecter()
     {
-        _client = new TcpClient(host, port);
+        _client = new TcpClient();
+        _client.Connect(host, port);
         _flux = _client.GetStream();
         EnvoiJson($"{{\"type\":\"hello\",\"proto\":\"miku-link/1\",\"agent\":\"{nomAgent}\",\"perception\":\"moteur jeu\"}}");
         _lireThread = new Thread(LireBoucle) { IsBackground = true };
@@ -81,7 +115,11 @@ public class MikuLink : MonoBehaviour
     void EnvoiJson(string json)
     {
         byte[] b = Encoding.UTF8.GetBytes(json + "\n");
-        lock (_verrouSends) { try { _flux.Write(b, 0, b.Length); } catch { _vivant = false; } }
+        lock (_verrouSends)
+        {
+            try { _flux.Write(b, 0, b.Length); }
+            catch { _flux = null; }   // coupé -> la reconnexion auto reprendra
+        }
     }
 
     IEnumerator EnvoyerMonde()
@@ -155,7 +193,16 @@ public class MikuLink : MonoBehaviour
         else if (ligne.Contains("\"type\":\"emote\""))
             SurEmote?.Invoke(ExtraireChamp(ligne, "de"), ExtraireChamp(ligne, "emotion"));
         else if (ligne.Contains("\"type\":\"arrivee\""))
-            SurArrivee?.Invoke(ExtraireChamp(ligne, "agent"), ExtraireChamp(ligne, "perception"));
+        {
+            var agent = ExtraireChamp(ligne, "agent");
+            SurArrivee?.Invoke(agent, ExtraireChamp(ligne, "perception"));
+            // l'annuaire vivant : un agent CONNU est salué différemment
+            // (« re ! ») par qui veut l'entendre — la vie sociale a une
+            // mémoire, c'est le post Python qui la porte.
+            var connu = ExtraireChamp(ligne, "connu");
+            if (connu == "True")
+                SurEmote?.Invoke(agent, "revient (" + ExtraireChamp(ligne, "rencontres") + "e fois)");
+        }
         else if (ligne.Contains("\"type\":\"pose\""))
         {
             var pose = JsonUtility.FromJson<PoseMsg>(ligne);
@@ -171,6 +218,7 @@ public class MikuLink : MonoBehaviour
         for (int i = 0; i < jointsJambes.Length && i < q.Length; i++)
         {
             if (jointsJambes[i] == null) continue;
+            if (!float.IsFinite((float)q[i])) continue;   // NaN/Inf = on ignore
             var e = jointsJambes[i].localRotation.eulerAngles;
             float angle = (float)(q[i] * Mathf.Rad2Deg);
             // les(genoux : le moteur envoie une flexion négative -> plier le genou

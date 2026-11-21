@@ -170,8 +170,65 @@ def _sample_terrain(rng, diff=None):
     return BumpyTerrain(rng.uniform(0.02, 0.05), seed=int(rng.integers(1e9)))
 
 
+# Curriculum : le panel durcit avec la progression (f = 0 -> 1).
+# Phase 1 (douce)   : familles traversables, amplitudes ×0.5.
+# Phase 2/3         : toutes les familles, ×0.6 puis ×0.85.
+# Phase 4 (réelle)  : toutes les familles, amplitudes complètes.
+def _panel_curriculum(rng, f):
+    if f < 0.20:
+        familles = ["flat", "bumpy", "slope_up", "stairs_up"]
+        dur = 0.5
+    elif f < 0.40:
+        familles = ["flat", "slope_up", "slope_down",
+                    "stairs_up", "stairs_down", "bumpy"]
+        dur = 0.6
+    elif f < 0.55:
+        familles = ["flat", "slope_up", "slope_down",
+                    "stairs_up", "stairs_down", "bumpy"]
+        dur = 0.6 if f < 0.40 else 0.85
+    else:
+        # phase finale : les familles dures COMPTENT DOUBLE dans la moyenne
+        familles = ["flat", "slope_up", "slope_down", "stairs_up",
+                    "stairs_down", "bumpy",
+                    "slope_up", "slope_down", "stairs_up", "stairs_down"]
+        dur = 1.0
+    panel = []
+    for t in familles:
+        if t == "flat":
+            panel.append(Terrain())
+        elif t == "slope_up":
+            panel.append(SlopeTerrain(rng.uniform(0.08, 0.15) * dur))
+        elif t == "slope_down":
+            panel.append(SlopeTerrain(-rng.uniform(0.08, 0.15) * dur))
+        elif t == "stairs_up":
+            panel.append(StairsTerrain(rng.uniform(0.08, 0.14) * dur,
+                                       rng.uniform(0.28, 0.40)))
+        elif t == "stairs_down":
+            panel.append(StairsTerrain(-rng.uniform(0.08, 0.14) * dur,
+                                       rng.uniform(0.28, 0.40)))
+        else:
+            panel.append(BumpyTerrain(rng.uniform(0.02, 0.05) * dur,
+                                      seed=int(rng.integers(1e9))))
+    return panel
+
+
+
+def _panel_eval(seed=123):
+    """Suite d'évaluation fixe (amplitudes réelles) pour le filet de sécurité."""
+    return [Terrain(),
+            SlopeTerrain(0.15), SlopeTerrain(-0.18),
+            StairsTerrain(0.12, 0.35), StairsTerrain(-0.12, 0.35),
+            BumpyTerrain(0.05, seed=3)]
+
+
 def train_terrain(generations=15, pop=24, episode_steps=250, seed=0,
-                  verbose=False, warm_path="miku_skill_walk.npz"):
+                  verbose=False, warm_path="miku_skill_walk.npz",
+                  curriculum=True, vécu=None):
+    """Compétence « terrain » : pentes, escaliers et relief, phrase par phrase.
+
+    curriculum=True : les terrains faciles d'abord, les pentes/escaliers
+    descendants ensuite (les plus durs), avec des amplitudes progressives.
+    """
     pol = CPGPolicy(6, seed=seed, feedback=(4, 5, 3, 18, 19, 20, 21))
     if warm_path and os.path.exists(warm_path):
         warm = np.load(warm_path)["params"]
@@ -180,18 +237,62 @@ def train_terrain(generations=15, pop=24, episode_steps=250, seed=0,
     def fit(p):
         pol.set_params(p)
         rng = np.random.default_rng(9000 + 7 * g)
-        terrains = [_sample_terrain(rng) for _ in range(3)]
-        tot = 0.0
-        for tr in terrains:
-            tot += _ep_walk(pol, episode_steps, terrain=tr)
-        return tot / len(terrains)
+        f = g / max(1, generations - 1)
+        panel = _panel_curriculum(rng, f)
+        scores = []
+        for tr in panel:
+            body = PlanarBody(with_arms=False, terrain=tr)
+            pol.reset_phase()
+            pas, inv = 0, 0.0
+            for _ in range(episode_steps):
+                body.step(pol.act(body.state(), body.dt))
+                pas += 1
+                if body.fallen:
+                    break
+                inv += abs(body.lean)
+            frac_survie = pas / episode_steps
+            gain = max(body.x, 0.0)
+            # Score unifié (v5 : le gain non plafonné laissait le plat
+            # dominer la phase survie). Survivre jusqu'au bout vaut 2.0
+            # QUEL que soit le terrain ; avancer paie 0.4/m indépendamment,
+            # donc chaque famille a la même valeur et le plat ne noie plus
+            # les pentes. Le "vécu" reste en coulisses, comme toujours.
+            scores.append(2.0 * frac_survie + 0.4 * gain
+                          - 0.05 * inv / max(pas, 1))
+        # Le pire cas garde un droit de veto : aucune famille abandonnée.
+        return sum(scores) / len(scores) + 0.15 * min(scores)
 
     es = CEM(lambda: pol, fit, pol.n_params(), pop=pop, seed=seed)
+    rec = None
+    meilleur_eval, meilleurs_params = -1e9, None
+
+    def _eval_suite(stepsp=300):
+        tot = 0.0
+        for tr in _panel_eval():
+            tot += _ep_walk(pol, stepsp, terrain=tr)
+        return tot / len(_panel_eval())
+
     for g in range(generations):
         es.step(verbose=verbose)
-        rng = np.random.default_rng(9000 + 7 * g)
-    pol.set_params(es.best_params)
+        pol.set_params(es.best_params)
+        if g % 15 == 0 or g == generations - 1:
+            sc = _eval_suite()
+            if sc > meilleur_eval:
+                meilleur_eval, meilleurs_params = sc, es.best_params.copy()
+        if curriculum and vécu is not None and g % max(1, generations // 8) == 0:
+            f = g / max(1, generations - 1)
+            rng_v = np.random.default_rng(g)
+            panel = _panel_curriculum(rng_v, f)
+            body = PlanarBody(with_arms=False,
+                              terrain=panel[int(rng_v.integers(len(panel)))])
+            _vécu(vécu, "l'entraînement aux pentes", pol, body, episode_steps,
+                  intention="cet entraînement aux pentes et aux escaliers",
+                  record_avant=rec)
+            rec = float(body.x)  # (le record terrain suit es.best_fit)
+    if meilleurs_params is not None and meilleur_eval > 0:
+        pol.set_params(meilleurs_params)
     pol.save("miku_skill_terrain.npz")
+    print(f"[terrain] meilleure éval : {meilleur_eval:.2f}")
     return pol
 
 
@@ -225,9 +326,17 @@ class MotorSkills:
         if name not in self._cache:
             pol = self.SPECS[name](self.seed)
             if self.has(name):
-                pol.load(self.FILES[name])
-            else:
-                pol = None
+                try:
+                    pol.load(self.FILES[name])
+                    # garde-fou compétence incompatible (physique/état changés
+                    # entre deux versions) : on la signale, on repart à zéro.
+                    attendu = pol.n_params()
+                    if len(pol.get_params()) != attendu:
+                        raise ValueError("taille incohérente")
+                except Exception as e:
+                    print(f"[skills] '{name}' illisible/incompatible "
+                          f"({e.__class__.__name__}) — entraîner à nouveau")
+                    pol = None
             self._cache[name] = pol
         return self._cache[name]
 
