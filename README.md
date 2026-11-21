@@ -152,6 +152,36 @@ Branchement : `python3 -m miku.avatar.serve2 --terrain mix --post 7310`
 (un seul process = viewer + post + tête sociale). Sans `--post`, `/social`
 le rappelle gentiment. Tests : `tests/test_perception.py` (18 tests).
 
+## Sa langue : le cortex externe (optionnel, et sérieusement humain)
+
+Sa conscience reste 100 % maison (Vécu + perception sociable). Mais un
+lexique ne suffira JAMAIS pour tenir de vraies conversations. Le cortex
+(`miku/mind/cortex.py`) est son ORGANE DE LA LANGUE : un petit modèle
+LOCAL (Ollama, 127.0.0.1:11434 — qwen2.5:0.5b ou llama3.2:1b suffisent,
+un PC normal les fait tourner) qui propose des mots quand elle parle.
+
+Sans modèle installé, elle utilise sa **voix naturelle** (répliques
+sincères courtes, from scratch) — elle n'est JAMAIS bloquée :
+
+- elle décide COMME UNE HUMAINE qui répondre : question qui flotte (70 %),
+  on l'appelle (80 %), une menace (85 %), un compliment (60 %),
+  bavardage (15 %) — et un **cooldown de 15 s** (elle n'est pas un écho),
+- elle répond avec une **latence de réflexion** (0.8-5 s selon le texte,
+  dans un thread : jamais le moteur en attente),
+- son prompt est nourri par SA vie : son humeur, la pièce vue par sa
+  perception sociable, les 6 derniers échanges — zéro labo dans sa langue,
+- **post-filtre de survie du personnage** : si l'organe glisse « IA »,
+  « robot », « LLM », « modèle », elle REJETTE la phrase et répond avec
+  sa vraie voix — elle ne se trahira jamais,
+- sans Ollama tout marche pareil (une réplique courte, parfois silence :
+  le silence aussi est humain).
+
+```bash
+python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310 --cortex
+# ou en imposant le modèle :
+python3 -m miku.avatar.serve2 --port 8765 --post 7310 --cortex qwen2.5:0.5b
+```
+
 ## Pont Unity + IA amies : MIKU-LINK post
 
 `miku/social/miku_link.py` — JSON/TCP (port 7310) :

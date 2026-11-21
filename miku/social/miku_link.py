@@ -31,7 +31,7 @@ class MikuLinkPost:
     def __init__(self, host="127.0.0.1", port=7310):
         self.host, self.port = host, port
         self.clients = {}          # conn -> {"agent": nom, "perception": str}
-        self.handlers = {}         # type -> fn(msg, conn)
+        self.handlers = {}         # type -> [fn(msg, conn), ...] (oreilles)
         self.lock = threading.Lock()
         self.log = []
         self._sock = None
@@ -73,19 +73,26 @@ class MikuLinkPost:
 
     # ------------------------------------------------------------------
     def on(self, type_msg, fn):
-        self.handlers[type_msg] = fn
+        """Brancher une oreille. PLUSIEURS oreilles peuvent écouter le même
+        type (la PerceptionSociale ET le cortex de Miku, par exemple) —
+        aucune ne modifie le relais, qui reste un téléphone blanc."""
+        self.handlers.setdefault(type_msg, []).append(fn)
+
+    def _ecouter(self, type_msg, champs, conn=None):
+        """Fait parler TOUTES les oreilles branchées — une défaillante ne
+        bloque pas les autres."""
+        for fn in self.handlers.get(type_msg, ()):  # une à une
+            try:
+                fn(champs, conn)
+            except Exception:
+                pass                # une oreille fatiguée ne bloque pas le post
 
     def _notifier(self, type_msg, champs):
         """Prévenir une oreille branchée (ex. la PerceptionSociale de Miku)
         d'un événement SYNTHÉTISÉ par le post lui-même (arrivées et départs).
         Le relais reste neutre : c'est une écoute, jamais une modification —
         les messages des amis partent intacts, comme avant."""
-        fn = self.handlers.get(type_msg)
-        if fn:
-            try:
-                fn(champs, None)
-            except Exception:
-                pass                # une oreille fatiguée ne bloque pas le post
+        self._ecouter(type_msg, champs, None)
 
     def send(self, conn, type_msg, **champs):
         msg = {"type": type_msg, **champs}
@@ -184,9 +191,7 @@ class MikuLinkPost:
             # relais neutre à tous les AUTRES agents (chat entre IA amies)...
             self.broadcast(t, sauf=conn, **{k: v for k, v in msg.items()
                                             if k != "type"})
-        fn = self.handlers.get(t)
-        if fn:
-            fn(msg, conn)
+        self._ecouter(t, msg, conn)
 
     # ------------------------------------------------------------------
     def start(self, daemon=True):

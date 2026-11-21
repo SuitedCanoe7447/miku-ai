@@ -171,8 +171,12 @@ Le post MIKU-LINK post reconnaît maintenant les agents DÉJÀ rencontrés
 Lance le tout-en-un pour qu'elle ENTENDE ce qui se passe autour d'elle :
 
 ```bash
-python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310
+python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310 --cortex
 ```
+
+> **--cortex** : sa langue. Petit modèle LOCAL (Ollama : `ollama pull
+> qwen2.5:0.5b`) ; sinon elle parle avec sa voix naturelle (répliques
+> courtes sincères) — rien ne plante jamais sans le modèle.
 
 (le post MIKU-LINK post et sa perception sociable démarrent dans le même
 process — plus besoin d'un terminal séparé pour le post). Le relais reste

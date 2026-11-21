@@ -50,6 +50,7 @@ import numpy as np
 from miku.body.physics import (PlanarBody, Terrain, StairsTerrain,
                                SlopeTerrain, BumpyTerrain)
 from miku.body.motor import MotorSkills
+from miku.mind.cortex import CortexExterne
 from miku.mind.experience import Vécu
 from miku.social.miku_link import MikuLinkPost
 from miku.social.perception import PerceptionSociale, écoute_le_post
@@ -231,6 +232,7 @@ class PoseSource:
 
 SOURCE = None
 SOCIAL = None                  # sa tête sociale (None sans --post)
+CORTEX = None                  # sa langue (None sans --cortex)
 _MODEL_CACHE = None
 
 
@@ -293,6 +295,8 @@ class Handler(BaseHTTPRequestHandler):
             msg = {"situation": SOCIAL.situation(),
                    "recit": SOCIAL.récit(),
                    "humeur": SOURCE.vécu.humeur()}
+            if CORTEX is not None:
+                msg["cortex"] = CORTEX.info()
             return self._send(200, "application/json",
                               json.dumps(msg, ensure_ascii=False).encode())
         if p == "/health":
@@ -300,23 +304,32 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "text/plain", b"404")
 
 
-def serve(port=8080, model=None, terrain=None, post_port=0):
-    global MODEL, SOURCE, SOCIAL
+def serve(port=8080, model=None, terrain=None, post_port=0, cortex=""):
+    global MODEL, SOURCE, SOCIAL, CORTEX
     if model:
         MODEL = model
     SOURCE = PoseSource(terrain)
     SOCIAL = None
+    CORTEX = None
     if post_port:
         # sa tête sociale écoute le post MIKU-LINK et partage le Vécu du
         # corps : UN compliment reçu la réjouit pour de vrai
         SOCIAL = PerceptionSociale(vécu=SOURCE.vécu)
         post = MikuLinkPost(port=post_port)
         écoute_le_post(SOCIAL, post)
+        # et SA LANGUE, si demandé : --cortex (auto) ou --cortex modele
+        if cortex:
+            CORTEX = CortexExterne(post, perception=SOCIAL,
+                                   vécu=SOURCE.vécu,
+                                   model=(None if cortex == "auto"
+                                          else cortex))
+            CORTEX.start()
         post.start()
     srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"MIKU avatar : http://127.0.0.1:{port}  (model={MODEL}, "
           f"terrain={terrain or 'flat'}"
-          f"{f', post social 127.0.0.1:{post_port}' if post_port else ''})")
+          f"{f', post social 127.0.0.1:{post_port}' if post_port else ''}"
+          f"{f', cortex={CORTEX.cerveau or "voix naturelle"}' if CORTEX else ''})")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -332,5 +345,12 @@ if __name__ == "__main__":
     ap.add_argument("--post", type=int, default=0, metavar="PORT",
                     help="ouvrir aussi le post MIKU-LINK + perception "
                          "sociale (ex. --post 7310)")
+    ap.add_argument("--cortex", nargs="?", const="auto", default="",
+                    metavar="MODELE",
+                    help="activer sa langue : --cortex (auto-détection "
+                         "Ollama) ou --cortex qwen2.5:0.5b (nécessite "
+                         "--post)")
     a = ap.parse_args()
-    serve(a.port, a.model, a.terrain, a.post)
+    if a.cortex and not a.post:
+        a.post = 7310                  # sa langue voyage par le post
+    serve(a.port, a.model, a.terrain, a.post, a.cortex)
