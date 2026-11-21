@@ -1,0 +1,22 @@
+{
+ "pelvis": "bone3",
+ "pelvis2": "bone1",
+ "spine": "bone19",
+ "chest": "bone20",
+ "neck": "bone21",
+ "head": "bone75",
+ "shoulderR": "bone27",
+ "upperArmR": "bone28",
+ "shoulderL": "bone50",
+ "upperArmL": "bone51",
+ "hipR": "bone4",
+ "kneeR": "bone6",
+ "footR": "bone8",
+ "hipL": "bone2",
+ "kneeL": "bone5",
+ "footL": "bone7",
+ "lowerArmR": "bone29",
+ "handR": "bone30",
+ "lowerArmL": "bone52",
+ "handL": "bone53"
+}

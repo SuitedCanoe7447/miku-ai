@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+model_raw/hatsune-mega-mix.zip
+model_raw/miku_megamix.glb

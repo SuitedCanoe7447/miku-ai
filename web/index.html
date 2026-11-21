@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>MIKU-01 — Hatsune Mega Mix</title>
+<style>
+  body { margin:0; overflow:hidden; background:#0b0e14; font-family:sans-serif; color:#9ad; }
+  #hud { position:fixed; top:8px; left:8px; font-size:12px; opacity:.85 }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="hud">MIKU-01 — Hatsune Mega Mix (oscar3dmodel, CC-BY) — <span id="mode">chargement…</span></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0e14);
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 100);
+camera.position.set(0, 1.4, 3.2);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.8, 0);
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x30281e, 1.15));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(2, 4, 2); scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(3, 48).rotateX(-Math.PI/2),
+  new THREE.MeshStandardMaterial({color:0x22303a, roughness:.95}));
+scene.add(ground);
+const grid = new THREE.GridHelper(6, 24, 0x3a5068, 0x24313d);
+scene.add(grid);
+
+let model = null;
+const buttons = {};   // role -> Object3D
+let rig = null;
+let pelvisY = null;
+
+fetch('/rig_map.json').then(r=>r.json()).then(map=>{ rig = map; });
+new GLTFLoader().load('/model.glb', (gltf)=>{
+  model = gltf.scene;
+  scene.add(model);
+  model.traverse(o=>{
+    if (o.isMesh) o.frustumCulled = false;
+    if (o.isBone) buttons[o.name] = o;
+  });
+  if (rig && rig.pelvis && buttons[rig.pelvis]) pelvisY = buttons[rig.pelvis].position.y;
+  document.getElementById('mode').textContent = 'prête';
+}, undefined, (e)=>{ document.getElementById('mode').textContent = 'erreur chargement : '+e; });
+
+// posture (angles en degrés) -> rotations locales des os
+function applyPose(p){
+  if (!model || !rig) return;
+  const D2R = Math.PI/180;
+  const set = (role, ax, deg)=>{
+    const b = buttons[rig[role]];
+    if (b && deg!==undefined) b.rotation[ax] = deg*D2R;
+  };
+  // rotations autour de l'axe latéral local (z local = ligne de Hanche)
+  if (p.legs){
+    set('hipL','z', -(p.legs.L?.hip||0));
+    set('kneeL','z', -(p.legs.L?.knee||0));
+    set('footL','z', -(p.legs.L?.ankle||0));
+    set('hipR','z', -(p.legs.R?.hip||0));
+    set('kneeR','z', -(p.legs.R?.knee||0));
+    set('footR','z', -(p.legs.R?.ankle||0));
+  }
+  if (p.arms){
+    set('upperArmL','z', (p.arms.L?.shoulder||0));
+    set('lowerArmL','z', (p.arms.L?.elbow||0));
+    set('upperArmR','z', (p.arms.R?.shoulder||0));
+    set('lowerArmR','z', (p.arms.R?.elbow||0));
+  }
+  if (p.hips && buttons[rig['pelvis']] && pelvisY!==null){
+    buttons[rig['pelvis']].position.y = pelvisY + (p.hips.lift||0);
+  }
+  if (p.spine) set('spine','x', 0);
+}
+
+function fetchPose(){
+  fetch('/pose').then(r=>r.json()).then(p=>{
+    document.getElementById('mode').textContent = p.mode + (p.note? ' — '+p.note : '');
+    applyPose(p);
+  }).catch(()=>{});
+}
+setInterval(fetchPose, 50);
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
