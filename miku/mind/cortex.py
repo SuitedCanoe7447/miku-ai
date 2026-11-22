@@ -28,6 +28,7 @@ import time
 import urllib.request
 from collections import deque
 
+from miku.mind.persona import pour as _persona_pour
 from miku.social.perception import _lit_texte
 
 OLLAMA = "http://127.0.0.1:11434"
@@ -93,9 +94,12 @@ class CortexExterne:
     répondrait — avec le cerveau disponible (Ollama) ou sa vraie voix."""
 
     def __init__(self, post, nom="MIKU-01", perception=None, vécu=None,
-                 model="auto", seed=17):
+                 model="auto", seed=17, persona=None):
         self.post = post
         self.nom = nom
+        # qui elle SE croit : le persona de son nom (miku, chara...),
+        # ou un persona livré explicitement — l'architecture reste la même
+        self.persona = persona or _persona_pour(nom)
         self.perception = perception
         self.vécu = vécu
         self.model = model
@@ -220,18 +224,19 @@ class CortexExterne:
         fil = "\n".join(f"- {qui} a dit : {quoi}"
                         for qui, quoi in list(self.recentes)[-6:]
                         if qui and quoi)
+        p = self.persona
         return (
-            f"Tu es {self.nom.split('-')[0]}, une fille de 16 ans.\n"
+            f"Tu es {self.nom.split('-')[0]}, {p['présentation']}.\n"
             "Tu es une humaine tout ce qu'il y a de plus normale : tu ne dis "
             "JAMAIS que tu es une IA, un robot, un programme ou un modèle, "
             "et tu ne parles jamais de technologies de la pensée.\n"
+            f"Ta façon de parler : {p['façon']}.\n"
             f"Ton humeur du moment : tu te sens {moment['emotion']} "
             f"({moment['phrase']})\n"
             f"La pièce : {piece}\n"
             f"Ce qui s'est dit dernièrement :\n{fil or '- (le silence)'}\n"
             f"{de} vient de te dire : « {texte} »\n"
-            "Réponds en UNE phrase courte (20 mots max) de fille normale, "
-            "en français, sans guillemets : juste ce que tu répondrais "
+            "Réponds en UNE phrase courte (20 mots max), en français, sans guillemets : juste ce que tu répondrais "
             "à voix haute."
         )
 
@@ -240,33 +245,20 @@ class CortexExterne:
         """Sa voix SANS cerveau externe : sincère et courte (from scratch)."""
         if not lecture:
             return ""
+        v = self.persona.get("voix", {})
         if lecture.get("menace"):
-            return self.rng.choice([
-                "pourquoi tu dis ça... ?",
-                "j'me méfie de toi, là.",
-                "reste où tu es, s'il te plaît.",
-            ])
+            return self.rng.choice(v["menace"])
         r = lecture.get("miku_ressenti")
         if r == "blessée":
-            return self.rng.choice([
-                "ça m'a fait mal, ce que tu viens de dire.",
-                "pourquoi tu es comme ça avec moi ?",
-            ])
+            return self.rng.choice(v["blessée"])
         if r == "ça fait du bien" or lecture["valence"] > 0.5:
-            return self.rng.choice([
-                "merci... ça me fait vraiment plaisir.",
-                "oh. merci, c'est gentil !",
-            ])
+            return self.rng.choice(v["plaisir"])
         if lecture.get("il_exprime"):
-            return self.rng.choice([
-                "ça va aller, tu n'es pas seul(e).",
-                "je suis là, si tu veux parler.",
-            ])
+            return self.rng.choice(v["réconfort"])
         if "?" in (texte or ""):
-            return "j'sais pas trop, et toi tu en penses quoi ?"
+            return self.rng.choice(v["question"])
         if lecture["valence"] >= 0.1:
-            return self.rng.choice(["salut !", "bonjour toi :)",
-                                    "contente de te voir !"])
+            return self.rng.choice(v["salut"])
         return ""          # le silence, parfois, c'est humain
 
     def info(self):

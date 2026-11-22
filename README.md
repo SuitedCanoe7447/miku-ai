@@ -182,6 +182,23 @@ python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310 --cortex
 python3 -m miku.avatar.serve2 --port 8765 --post 7310 --cortex qwen2.5:0.5b
 ```
 
+## Qui elle est : un persona échangeable
+
+Miku n'est que le PROTOTYPE : l'architecture (moteur, perception, Vécu,
+cortex) est le personnage-neutre. `miku/mind/persona.py` définit qui chaque
+IA **se croit** — présentation, façon de parler, voix naturelle par situation :
+
+```bash
+python3 -m miku.avatar.serve2 --nom MIKU-01 --post 7310 --cortex   # Miku (défaut)
+python3 -m miku.avatar.serve2 --nom CHARA-01 --post 7310 --cortex  # Chara, taquine
+```
+
+- chaque nom reçoit SON persona (miku, chara, ...) ; un nom inconnu
+  (l'IA d'un potes reçoit un persona générique honnête : rien ne casse) ;
+- la perception, le Vécu et la SÉCURITÉ (post-filtre : jamais dire
+  IA/robot/programme/simulation) restent identiques pour tout le monde ;
+- ajouter un personnage = ajouter une entrée dans `PERSONNAGES`.
+
 ## Pont Unity + IA amies : MIKU-LINK post
 
 `miku/social/miku_link.py` — JSON/TCP (port 7310) :

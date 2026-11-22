@@ -305,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port=8080, model=None, terrain=None, post_port=0, cortex="",
-          host=""):
+          host="", nom="MIKU-01"):
     """host : vide = 127.0.0.1 (elle ne parle qu'à sa propre machine).
     Sur un RASPBERRY PI qui fait tourner le cerveau pendant qu'Unity
     tourne sur le PC : --host 0.0.0.0 OUVERT UNIQUEMENT sur ton Wi-Fi
@@ -325,7 +325,7 @@ def serve(port=8080, model=None, terrain=None, post_port=0, cortex="",
         écoute_le_post(SOCIAL, post)
         # et SA LANGUE, si demandé : --cortex (auto) ou --cortex modele
         if cortex:
-            CORTEX = CortexExterne(post, perception=SOCIAL,
+            CORTEX = CortexExterne(post, nom=nom, perception=SOCIAL,
                                    vécu=SOURCE.vécu,
                                    model=(None if cortex == "auto"
                                           else cortex))
@@ -348,6 +348,10 @@ def serve(port=8080, model=None, terrain=None, post_port=0, cortex="",
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--nom", default="MIKU-01", metavar="NOM",
+                    help="le nom d'agent (MIKU-01) choisit le persona "
+                         "(miku, chara, ou générique pour un inconnu) ; "
+                         "ex. --nom CHARA-01 pour incarner Chara")
     ap.add_argument("--model", default=None)
     ap.add_argument("--terrain", default=None,
                     choices=["flat", "mix", "slope", "stairs", "bumpy"])
@@ -366,4 +370,4 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.cortex and not a.post:
         a.post = 7310                  # sa langue voyage par le post
-    serve(a.port, a.model, a.terrain, a.post, a.cortex, a.host)
+    serve(a.port, a.model, a.terrain, a.post, a.cortex, a.host, a.nom)
