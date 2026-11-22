@@ -174,6 +174,32 @@ Lance le tout-en-un pour qu'elle ENTENDE ce qui se passe autour d'elle :
 python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310 --cortex
 ```
 
+### Option « Raspberry Pi cerveau » (Pi 5, PC = Unity)
+
+Tu peux faire tourner TOUT le côté Python sur un Pi 5 (8 Go) pendant
+qu'Unity rend le monde sur ton PC — le Pi est son corps mental :
+
+```bash
+# sur le Pi (IP ex. 192.168.1.42) :
+python3 -m miku.avatar.serve2 --terrain mix --port 8765 --post 7310 \
+    --host 0.0.0.0 --cortex qwen2.5:0.5b
+```
+
+et côté Unity : **Host = 192.168.1.42** (au lieu de 127.0.0.1) dans
+MikuLink.cs, et `http://192.168.1.42:8765/pose` dans le pilote.
+
+Le moteur maison (physique + CPG + perception) est tout plein de numpy :
+il consomme moins de 5 % du Pi. Le LLM, LUI, tourne sur le CPU du Pi
+(`qwen2.5:0.5b` ≈ 3-6 s par réplique — sa latence de réflexion humaine
+s'additionne, on ne la remarque même pas).
+
+> Le **AI HAT+ (Hailo) n'accélère PAS Ollama** : le LLM tourne sur CPU.
+> Le HAT sert à la VISION (caméra, détection d'objets pour son monde) —
+> parfait pour une étape future de perception visuelle.
+
+> **--host 0.0.0.0** ouvre les portes (:8765 et :7310) — UNIQUEMENT sur
+> ton Wi-Fi de confiance. Par défaut tout reste verrouillé sur 127.0.0.1.
+
 > **--cortex** : sa langue. Petit modèle LOCAL (Ollama : `ollama pull
 > qwen2.5:0.5b`) ; sinon elle parle avec sa voix naturelle (répliques
 > courtes sincères) — rien ne plante jamais sans le modèle.

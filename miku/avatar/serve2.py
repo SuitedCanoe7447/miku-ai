@@ -304,10 +304,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "text/plain", b"404")
 
 
-def serve(port=8080, model=None, terrain=None, post_port=0, cortex=""):
+def serve(port=8080, model=None, terrain=None, post_port=0, cortex="",
+          host=""):
+    """host : vide = 127.0.0.1 (elle ne parle qu'à sa propre machine).
+    Sur un RASPBERRY PI qui fait tourner le cerveau pendant qu'Unity
+    tourne sur le PC : --host 0.0.0.0 OUVERT UNIQUEMENT sur ton Wi-Fi
+    de confiance — la porte reste verrouillée par défaut."""
     global MODEL, SOURCE, SOCIAL, CORTEX
     if model:
         MODEL = model
+    host = host or "127.0.0.1"
     SOURCE = PoseSource(terrain)
     SOCIAL = None
     CORTEX = None
@@ -315,7 +321,7 @@ def serve(port=8080, model=None, terrain=None, post_port=0, cortex=""):
         # sa tête sociale écoute le post MIKU-LINK et partage le Vécu du
         # corps : UN compliment reçu la réjouit pour de vrai
         SOCIAL = PerceptionSociale(vécu=SOURCE.vécu)
-        post = MikuLinkPost(port=post_port)
+        post = MikuLinkPost(host=host, port=post_port)
         écoute_le_post(SOCIAL, post)
         # et SA LANGUE, si demandé : --cortex (auto) ou --cortex modele
         if cortex:
@@ -325,11 +331,14 @@ def serve(port=8080, model=None, terrain=None, post_port=0, cortex=""):
                                           else cortex))
             CORTEX.start()
         post.start()
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"MIKU avatar : http://127.0.0.1:{port}  (model={MODEL}, "
+    srv = ThreadingHTTPServer((host, port), Handler)
+    print(f"MIKU avatar : http://{host}:{port}  (model={MODEL}, "
           f"terrain={terrain or 'flat'}"
-          f"{f', post social 127.0.0.1:{post_port}' if post_port else ''}"
+          f"{f', post social {host}:{post_port}' if post_port else ''}"
           f"{f', cortex={CORTEX.cerveau or "voix naturelle"}' if CORTEX else ''})")
+    if host != "127.0.0.1":
+        print(f"ATTENTION : porte OUVERTE sur {host} (post {post_port} + "
+              f"web {port}) — uniquement sur un réseau de confiance !")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -350,7 +359,11 @@ if __name__ == "__main__":
                     help="activer sa langue : --cortex (auto-détection "
                          "Ollama) ou --cortex qwen2.5:0.5b (nécessite "
                          "--post)")
+    ap.add_argument("--host", default="", metavar="ADRESSE",
+                    help="écouter au-delà de soi-même (ex. 0.0.0.0 pour "
+                         "qu'Unity sur ton PC rejoigne le Pi) — "
+                         "réseau de confiance UNIQUEMENT")
     a = ap.parse_args()
     if a.cortex and not a.post:
         a.post = 7310                  # sa langue voyage par le post
-    serve(a.port, a.model, a.terrain, a.post, a.cortex)
+    serve(a.port, a.model, a.terrain, a.post, a.cortex, a.host)
