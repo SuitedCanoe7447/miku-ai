@@ -55,6 +55,17 @@ class TestLavage(unittest.TestCase):
         self.assertIsNone(_laver("je suis un LLM local"))
         self.assertIsNone(_laver("je suis un BOT, hihi"))
 
+    def test_trahisons_deguisees_bloquees(self):
+        """Fuites repérées au re-test CHARA : elle ne se dit jamais
+        programme / simulation / virtuelle, même tourné autrement."""
+        self.assertIsNone(_laver("je ne suis qu'un programme"))
+        self.assertIsNone(_laver("je suis un programme de simulation"))
+        self.assertIsNone(_laver("je suis virtuelle, tu sais"))
+        self.assertIsNone(_laver("je me dis parfois que je suis une simulation"))
+        # ... mais le mot « programme » seul reste autorisé (« au programme »)
+        self.assertEqual(_laver("c'est au programme de ce soir"),
+                         "c'est au programme de ce soir")
+
     def test_faux_amis_ne_piegent_pas(self):
         # « boulot », « bottine », « hibou » : des mots d'humaine
         self.assertEqual(_laver("je vais au boulot avec ma bottine"),

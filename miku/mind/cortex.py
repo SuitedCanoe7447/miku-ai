@@ -43,6 +43,10 @@ INTERDITS_EXPRESSIONS = (
     "modèle de langue", "modèle de langage", "mode de langage",
     "modèle linguistique", "entraîné", "entraînée", "chatbot",
     "assistant virtuel", "langage de machine",
+    # trahisons déguisées (repérées au re-test CHARA) : elle ne se décrit
+    # jamais comme un programme / une simulation / une chose virtuelle.
+    "suis un programme", "suis qu'un programme", "suis une simulation",
+    "suis virtuelle", "suis un logiciel", "suis un algorithme",
 )
 INTERDITS_MOTS = ("llm", "bot", "robot", "token", "prompt", "ia",
                   "programmeur", "codeur", "fichier", "base de données")
